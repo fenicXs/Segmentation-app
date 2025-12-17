@@ -12,7 +12,7 @@ A lightweight frontend that sends chest X-ray images to an n8n workflow. The wor
 - `overview/` - screenshots used above.
 - Backend/model lives outside this repo (`segmentation model/SwinSegmentation` in your workspace) and is invoked by n8n.
 
-## Prerequisites
+<!-- ## Prerequisites
 - A running n8n instance with the workflow from this project:
   - Webhook node path: `seg-chestxray`
   - Binary field: `file`
@@ -54,4 +54,4 @@ curl -X POST "http://localhost:5678/webhook-test/seg-chestxray" \
 ## Notes
 - Ensure CORS is allowed if you host the frontend on a different origin than n8n (or use a proxy).
 - Keep the `file` field name unchanged unless you also adjust the Webhook node.
-- The overlay returned is a PNG; the mask is also written on disk by the inference script if you need it.
+- The overlay returned is a PNG; the mask is also written on disk by the inference script if you need it. -->
