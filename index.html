@@ -183,7 +183,48 @@
       classificationTableBody.innerHTML = "";
     }
 
-    async function sendToWebhook() {
+    
+  function normalizeResult(payload) {
+    // Accept either a single object or an array of one item
+    const base = Array.isArray(payload) ? (payload[0] || {}) : (payload || {});
+
+    // Try to locate classification data under different keys
+    const classification =
+      base.classification ||
+      base.classificationJSON ||
+      (base.json && (base.json.classification || base.json.classificationJSON)) ||
+      null;
+
+    // Try to locate overlay image in different shapes
+    let overlayBase64 = base.overlay_base64;
+    let overlayMime = base.overlay_mime_type || "image/png";
+
+    // n8n-style binary data on the root: { overlay: { data, mimeType, ... } }
+    if (!overlayBase64 && base.overlay && typeof base.overlay.data === "string") {
+      overlayBase64 = base.overlay.data;
+      overlayMime = base.overlay.mimeType || overlayMime;
+    }
+
+    // n8n-style binary data under "binary": { binary: { overlay: { data, mimeType } } }
+    if (
+      !overlayBase64 &&
+      base.binary &&
+      base.binary.overlay &&
+      typeof base.binary.overlay.data === "string"
+    ) {
+      overlayBase64 = base.binary.overlay.data;
+      overlayMime = base.binary.overlay.mimeType || overlayMime;
+    }
+
+    return {
+      overlay_base64: overlayBase64,
+      overlay_mime_type: overlayMime,
+      classification,
+      __raw: base,
+    };
+  }
+
+async function sendToWebhook() {
       if (!selectedFile) {
         setStatus("Please choose an image first.", "error");
         return;
@@ -221,7 +262,7 @@
           throw new Error("Server returned a non-JSON response. Check the n8n Respond to Webhook node.");
         }
 
-        const result = Array.isArray(payload) ? payload[0] : payload || {};
+        const result = normalizeResult(payload);
 
         // Overlay image
         if (result.overlay_base64) {
