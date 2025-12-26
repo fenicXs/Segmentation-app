@@ -3,44 +3,85 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chest X-ray Segmentation</title>
+  <title>Chest X-ray Segmentation & Classification</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="card">
-    <div>
+  <main class="card">
+    <section class="column column-left">
       <header>
-        <h1>Chest X-ray Segmentation</h1>
-        <p>Drop a chest X-ray, send it to the n8n webhook, and view the segmented overlay.</p>
+        <h1>Chest X-ray Segmentation &amp; Classification</h1>
+        <p>Drop a chest X-ray, send it to your n8n webhook, and view the segmented overlay plus predicted findings.</p>
       </header>
 
-      <div class="section" style="margin-top:16px;">
-        <label for="endpoint">Webhook endpoint (use /webhook for live, /webhook-test when workflow is not activated)</label>
-        <input id="endpoint" type="text" value="https://unappealed-oralia-unbeneficed.ngrok-free.dev/webhook/seg-chestxray" />
-        <div class="pill">Binary field name: <strong>file</strong></div>
+      <div class="section">
+        <label for="endpoint">n8n webhook URL</label>
+        <input
+          id="endpoint"
+          type="text"
+          value="https://unappealed-oralia-unbeneficed.ngrok-free.dev/webhook/seg-chestxray"
+        />
+        <p class="hint">
+          The workflow expects a <code>file</code> field (multipart/form-data) and returns JSON with
+          <code>classification</code> and a base64-encoded overlay.
+        </p>
       </div>
 
-      <div class="section" style="margin-top:16px;">
+      <div class="section">
         <div id="dropzone" class="dropzone">
-          <strong>Drag & drop</strong> a chest X-ray here or click to browse
-          <div class="file-meta" id="file-meta">No file selected</div>
+          <strong>Drag &amp; drop</strong> a chest X-ray here or click to browse.
+          <p class="file-meta" id="file-meta">No file selected.</p>
         </div>
-        <input id="file-input" type="file" accept="image/*" style="display:none;" />
+        <input id="file-input" type="file" accept="image/*" hidden />
+      </div>
 
-        <div class="actions">
-          <button id="run-btn" disabled>Segment</button>
-          <div class="status" id="status">Select an image to begin.</div>
+      <div class="section actions">
+        <button id="run-btn" disabled>Run analysis</button>
+        <p class="status" id="status">Select an image to begin.</p>
+      </div>
+    </section>
+
+    <section class="column column-right">
+      <div class="preview-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Segmentation overlay</h2>
+          </div>
+          <div class="image-frame">
+            <div id="preview-placeholder" class="placeholder">
+              Segmented overlay will appear here.
+            </div>
+            <img id="preview-img" alt="Segmented overlay" />
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Predicted findings</h2>
+          </div>
+          <div class="classification">
+            <p id="classification-summary" class="classification-summary">
+              Run the workflow to see disease probabilities.
+            </p>
+            <div class="table-wrapper">
+              <table id="classification-table">
+                <thead>
+                  <tr>
+                    <th>Disease</th>
+                    <th>Probability</th>
+                    <th>Above threshold?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-
-    <div class="section preview">
-      <div id="preview-placeholder" style="text-align:center; color:var(--muted); padding:12px;">
-        Segmented overlay will appear here.
-      </div>
-      <img id="preview-img" alt="Segmented overlay" style="display:none;" />
-    </div>
-  </div>
+    </section>
+  </main>
 
   <script>
     const dropzone = document.getElementById("dropzone");
@@ -51,12 +92,20 @@
     const endpointInput = document.getElementById("endpoint");
     const previewImg = document.getElementById("preview-img");
     const previewPlaceholder = document.getElementById("preview-placeholder");
+    const classificationSummary = document.getElementById("classification-summary");
+    const classificationTableBody = document.querySelector("#classification-table tbody");
 
     let selectedFile = null;
 
     function setStatus(text, tone = "muted") {
       statusEl.textContent = text;
-      statusEl.style.color = tone === "error" ? "#f87171" : (tone === "ok" ? "#a7f3d0" : "var(--muted)");
+      if (tone === "error") {
+        statusEl.style.color = "#f87171";
+      } else if (tone === "ok") {
+        statusEl.style.color = "#6ee7b7";
+      } else {
+        statusEl.style.color = "var(--muted)";
+      }
     }
 
     function humanSize(bytes) {
@@ -68,17 +117,145 @@
 
     function setFile(file) {
       selectedFile = file;
-      if (file) {
-        fileMeta.textContent = `${file.name} • ${humanSize(file.size)}`;
-        runBtn.disabled = false;
-        setStatus("Ready to send.");
-      } else {
-        fileMeta.textContent = "No file selected";
+      if (!file) {
+        fileMeta.textContent = "No file selected.";
         runBtn.disabled = true;
-        setStatus("Select an image to begin.");
+        return;
+      }
+      fileMeta.textContent = `${file.name || "upload.png"} · ${humanSize(file.size)}`;
+      runBtn.disabled = false;
+      setStatus("Ready. Click \"Run analysis\" to send to n8n.");
+    }
+
+    function renderClassification(classification) {
+      const threshold = typeof classification.threshold === "number" ? classification.threshold : 0.5;
+      const classes = Array.isArray(classification.classes) ? classification.classes.slice() : [];
+
+      // Sort classes by probability (descending)
+      classes.sort((a, b) => (b.probability || 0) - (a.probability || 0));
+
+      const positives = classes.filter((c) => c.positive);
+      if (positives.length > 0) {
+        const summaryList = positives
+          .map((c) => `${c.name} (${(c.probability * 100).toFixed(1)}%)`)
+          .join(", ");
+        classificationSummary.innerHTML =
+          `<strong>${positives.length} finding(s)</strong> above ${(threshold * 100).toFixed(
+            0
+          )}%: ${summaryList}`;
+      } else {
+        classificationSummary.textContent = `No findings above ${(threshold * 100).toFixed(
+          0
+        )}% confidence.`;
+      }
+
+      // Build table rows
+      const limit = Math.min(classes.length, 14);
+      classificationTableBody.innerHTML = "";
+      for (let i = 0; i < limit; i++) {
+        const cls = classes[i];
+        const tr = document.createElement("tr");
+
+        const nameTd = document.createElement("td");
+        nameTd.textContent = cls.name;
+
+        const probTd = document.createElement("td");
+        probTd.textContent = `${(cls.probability * 100).toFixed(1)}%`;
+
+        const posTd = document.createElement("td");
+        const badge = document.createElement("span");
+        badge.className = "badge " + (cls.positive ? "badge-positive" : "badge-negative");
+        badge.textContent = cls.positive ? "Yes" : "No";
+        posTd.appendChild(badge);
+
+        tr.appendChild(nameTd);
+        tr.appendChild(probTd);
+        tr.appendChild(posTd);
+        classificationTableBody.appendChild(tr);
       }
     }
 
+    function resetResults() {
+      previewImg.removeAttribute("src");
+      previewImg.style.display = "none";
+      previewPlaceholder.style.display = "flex";
+      classificationSummary.textContent = "Run the workflow to see disease probabilities.";
+      classificationTableBody.innerHTML = "";
+    }
+
+    async function sendToWebhook() {
+      if (!selectedFile) {
+        setStatus("Please choose an image first.", "error");
+        return;
+      }
+
+      const endpoint = endpointInput.value.trim();
+      if (!endpoint) {
+        setStatus("Endpoint cannot be empty.", "error");
+        return;
+      }
+
+      runBtn.disabled = true;
+      runBtn.textContent = "Running...";
+      setStatus("Uploading to n8n...");
+
+      const formData = new FormData();
+      formData.append("file", selectedFile, selectedFile.name || "upload.png");
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          body: formData,
+        });
+
+        const textBody = await response.text();
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status}): ${textBody.slice(0, 200)}`);
+        }
+
+        let payload;
+        try {
+          payload = JSON.parse(textBody);
+        } catch (err) {
+          console.error("Failed to parse JSON:", err, textBody);
+          throw new Error("Server returned a non-JSON response. Check the n8n Respond to Webhook node.");
+        }
+
+        const result = Array.isArray(payload) ? payload[0] : payload || {};
+
+        // Overlay image
+        if (result.overlay_base64) {
+          const mime = result.overlay_mime_type || "image/png";
+          const dataUrl = `data:${mime};base64,${result.overlay_base64}`;
+          previewImg.src = dataUrl;
+          previewImg.style.display = "block";
+          previewPlaceholder.style.display = "none";
+        } else {
+          resetResults();
+          setStatus("No overlay image found in the response.", "error");
+          return;
+        }
+
+        // Classification
+        if (result.classification) {
+          renderClassification(result.classification);
+        } else {
+          classificationSummary.textContent = "No classification data found in the response.";
+          classificationTableBody.innerHTML = "";
+        }
+
+        setStatus("Analysis complete.", "ok");
+      } catch (err) {
+        console.error(err);
+        resetResults();
+        setStatus(err.message || "Upload failed.", "error");
+      } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = "Run analysis";
+      }
+    }
+
+    // Drag & drop wiring
     dropzone.addEventListener("click", () => fileInput.click());
     dropzone.addEventListener("dragover", (e) => {
       e.preventDefault();
@@ -98,46 +275,6 @@
         setFile(e.target.files[0]);
       }
     });
-
-    async function sendToWebhook() {
-      if (!selectedFile) return;
-      const endpoint = endpointInput.value.trim();
-      if (!endpoint) {
-        setStatus("Endpoint cannot be empty.", "error");
-        return;
-      }
-
-      runBtn.disabled = true;
-      setStatus("Uploading to n8n...");
-
-      const formData = new FormData();
-      formData.append("file", selectedFile, selectedFile.name || "upload.png");
-
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(`Request failed (${response.status}): ${text.slice(0, 200)}`);
-        }
-
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-
-        previewImg.src = url;
-        previewImg.style.display = "block";
-        previewPlaceholder.style.display = "none";
-        setStatus("Segmentation complete.", "ok");
-      } catch (err) {
-        console.error(err);
-        setStatus(err.message || "Upload failed.", "error");
-      } finally {
-        runBtn.disabled = false;
-      }
-    }
 
     runBtn.addEventListener("click", sendToWebhook);
   </script>
