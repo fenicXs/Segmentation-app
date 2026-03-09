@@ -188,16 +188,20 @@
     // Accept either a single object or an array of one item
     const base = Array.isArray(payload) ? (payload[0] || {}) : (payload || {});
 
+    // If n8n wraps everything under a "json" key, unwrap it
+    const data = base.json && typeof base.json === "object" ? base.json : base;
+
     // Try to locate classification data under different keys
     const classification =
+      data.classification ||
+      data.classificationJSON ||
       base.classification ||
       base.classificationJSON ||
-      (base.json && (base.json.classification || base.json.classificationJSON)) ||
       null;
 
     // Try to locate overlay image in different shapes
-    let overlayBase64 = base.overlay_base64;
-    let overlayMime = base.overlay_mime_type || "image/png";
+    let overlayBase64 = data.overlay_base64 || base.overlay_base64;
+    let overlayMime = data.overlay_mime_type || base.overlay_mime_type || "image/png";
 
     // n8n-style binary data on the root: { overlay: { data, mimeType, ... } }
     if (!overlayBase64 && base.overlay && typeof base.overlay.data === "string") {
@@ -262,7 +266,9 @@ async function sendToWebhook() {
           throw new Error("Server returned a non-JSON response. Check the n8n Respond to Webhook node.");
         }
 
+        console.log("Raw payload from n8n:", JSON.stringify(payload).slice(0, 500));
         const result = normalizeResult(payload);
+        console.log("Normalized result keys:", Object.keys(result), "has overlay:", !!result.overlay_base64, "has classification:", !!result.classification);
 
         // Overlay image
         if (result.overlay_base64) {
