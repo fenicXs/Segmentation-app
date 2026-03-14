@@ -79,6 +79,37 @@
             </div>
           </div>
         </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Nodule localization</h2>
+          </div>
+          <div class="classification">
+            <p id="nodule-summary" class="classification-summary">
+              Run the workflow to see localized nodules.
+            </p>
+            <div class="image-frame">
+              <div id="nodule-placeholder" class="placeholder">
+                Nodule localization overlay will appear here.
+              </div>
+              <img id="nodule-img" alt="Nodule localization overlay" />
+            </div>
+            <div class="table-wrapper">
+              <table id="nodule-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Score</th>
+                    <th>Box (x1,y1,x2,y2)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -94,6 +125,10 @@
     const previewPlaceholder = document.getElementById("preview-placeholder");
     const classificationSummary = document.getElementById("classification-summary");
     const classificationTableBody = document.querySelector("#classification-table tbody");
+    const noduleSummary = document.getElementById("nodule-summary");
+    const nodulePlaceholder = document.getElementById("nodule-placeholder");
+    const noduleImg = document.getElementById("nodule-img");
+    const noduleTableBody = document.querySelector("#nodule-table tbody");
 
     let selectedFile = null;
 
@@ -181,6 +216,72 @@
       previewPlaceholder.style.display = "flex";
       classificationSummary.textContent = "Run the workflow to see disease probabilities.";
       classificationTableBody.innerHTML = "";
+      noduleSummary.textContent = "Run the workflow to see localized nodules.";
+      noduleTableBody.innerHTML = "";
+      noduleImg.removeAttribute("src");
+      noduleImg.style.display = "none";
+      nodulePlaceholder.style.display = "flex";
+    }
+
+    function renderNoduleLocalization(classification) {
+      const loc = classification && classification.nodule_localization
+        ? classification.nodule_localization
+        : null;
+      const detections = loc && Array.isArray(loc.detections) ? loc.detections : [];
+
+      const noduleOverlayBase64 =
+        (classification && classification.nodule_overlay_base64) || null;
+      const noduleOverlayMime =
+        (classification && classification.nodule_overlay_mime_type) || "image/png";
+
+      if (noduleOverlayBase64) {
+        noduleImg.src = `data:${noduleOverlayMime};base64,${noduleOverlayBase64}`;
+        noduleImg.style.display = "block";
+        nodulePlaceholder.style.display = "none";
+      } else {
+        noduleImg.removeAttribute("src");
+        noduleImg.style.display = "none";
+        nodulePlaceholder.style.display = "flex";
+      }
+
+      noduleTableBody.innerHTML = "";
+      if (detections.length === 0) {
+        const thresholdText =
+          loc && typeof loc.score_threshold === "number"
+            ? ` (threshold ${(loc.score_threshold * 100).toFixed(0)}%)`
+            : "";
+        noduleSummary.textContent = `No nodules detected${thresholdText}.`;
+        return;
+      }
+
+      const thresholdText =
+        loc && typeof loc.score_threshold === "number"
+          ? `above ${(loc.score_threshold * 100).toFixed(0)}%`
+          : "above threshold";
+      noduleSummary.textContent = `${detections.length} nodule detection(s) ${thresholdText}.`;
+
+      detections.forEach((det, idx) => {
+        const tr = document.createElement("tr");
+
+        const idxTd = document.createElement("td");
+        idxTd.textContent = String(idx + 1);
+
+        const scoreTd = document.createElement("td");
+        const score = typeof det.score === "number" ? det.score : 0;
+        scoreTd.textContent = `${(score * 100).toFixed(1)}%`;
+
+        const boxTd = document.createElement("td");
+        const box = Array.isArray(det.bbox) ? det.bbox : [];
+        const formattedBox = box.length === 4
+          ? box.map((v) => Number(v).toFixed(1)).join(", ")
+          : "N/A";
+        boxTd.textContent = formattedBox;
+
+        tr.appendChild(idxTd);
+        tr.appendChild(scoreTd);
+        tr.appendChild(boxTd);
+        noduleTableBody.appendChild(tr);
+      });
     }
 
     
@@ -286,9 +387,11 @@ async function sendToWebhook() {
         // Classification
         if (result.classification) {
           renderClassification(result.classification);
+          renderNoduleLocalization(result.classification);
         } else {
           classificationSummary.textContent = "No classification data found in the response.";
           classificationTableBody.innerHTML = "";
+          renderNoduleLocalization(null);
         }
 
         setStatus("Analysis complete.", "ok");
